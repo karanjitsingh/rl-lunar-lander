@@ -16,6 +16,7 @@ config.Training.Epsilon = [0.99, 0.05]
 config.Training.EpsilonDecay = 400
 config.Training.BatchSize = 64
 config.Training.MemorySize = 100000
+config.Training.MemoryInitFill = 0.5
 
 config.HiddenLayers = [150,100]
 

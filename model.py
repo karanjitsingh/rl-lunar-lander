@@ -24,7 +24,7 @@ class ModelConfig(object):
 
     # Training config
     class TrainingConfig(object):
-        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000):
+        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1):
             super().__init__()
             self.Gamma = Gamma
             self.Alpha = Alpha
@@ -32,6 +32,7 @@ class ModelConfig(object):
             self.EpsilonDecay = EpsilonDecay
             self.BatchSize = BatchSize
             self.MemorySize = MemorySize
+            self.MemoryInitFill = MemoryInitFill
 
     # Default config
     def __init__(self, hiddenLayers = [150, 100], trainingConfig: TrainingConfig = TrainingConfig()):
@@ -56,6 +57,7 @@ class Model(object):
         self.EDECAY = config.Training.EpsilonDecay
         self.BATCH_SIZE = config.Training.BatchSize
         self.MEMORY_SIZE = config.Training.MemorySize
+        self.MEMORY_INIT_FILL = config.Training.MemoryInitFill
 
         self.env = env
 
@@ -137,6 +139,7 @@ class Model(object):
 
         next_state_values = torch.zeros(self.BATCH_SIZE, device=device)
         next_state_values[non_final_mask] = self.net(non_final_next_states).max(1)[0].detach()
+
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * self.GAMMA) + reward_batch
 
@@ -167,12 +170,44 @@ class Model(object):
             return torch.tensor([[random.randrange(self.env.action_space.n)]], device=device, dtype=torch.long)  
 
 
+    def __fillMemory(self, memory: ReplayMemory, fill):
+        
+        steps = 0
+        env = self.env
+
+        while steps < fill* memory.capacity:
+            
+            state = torch.tensor([env.reset()]).float()
+            done = False
+
+            while not done:
+              
+                # always random
+                action = self.__selectAction(state, 1)
+                
+                next_state, reward, done, _ = env.step(action.item())
+
+                if not done:
+                    next_state = torch.tensor([next_state]).float()
+                else:
+                    next_state = None
+
+                memory.push(state, action, next_state, torch.tensor([reward]).float())
+                steps += 1
+
+                state = next_state
+
+
     # Train the current model
     def train(self, num_episodes, render = False):
         startTick = time.time()
 
         env = self.env
         memory = ReplayMemory(self.MEMORY_SIZE)
+
+        self.__fillMemory(memory, self.MEMORY_INIT_FILL)
+
+
         optimizer = optim.SGD(list(self.net.parameters()), lr=self.ALPHA)
 
         steps_done = 0
