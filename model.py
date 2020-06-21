@@ -24,7 +24,7 @@ class ModelConfig(object):
 
     # Training config
     class TrainingConfig(object):
-        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1):
+        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1, TorchSeed = torch.seed()):
             super().__init__()
             self.Gamma = Gamma
             self.Alpha = Alpha
@@ -33,6 +33,7 @@ class ModelConfig(object):
             self.BatchSize = BatchSize
             self.MemorySize = MemorySize
             self.MemoryInitFill = MemoryInitFill
+            self.TorchSeed = TorchSeed
 
     # Default config
     def __init__(self, hiddenLayers = [150, 100], trainingConfig: TrainingConfig = TrainingConfig()):
