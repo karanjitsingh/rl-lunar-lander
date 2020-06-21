@@ -8,7 +8,7 @@ class ReplayMemory(object):
 
     def __init__(self, capacity):
         super().__init__()
-        self.capaity = capacity
+        self.capacity = capacity
         self.memory = []
         self.position = 0
 
