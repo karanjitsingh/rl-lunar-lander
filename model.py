@@ -24,7 +24,7 @@ class ModelConfig(object):
 
     # Training config
     class TrainingConfig(object):
-        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1, TorchSeed = torch.seed()):
+        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1, TargetUpdate = 10, TorchSeed = torch.seed()):
             super().__init__()
             self.Gamma = Gamma
             self.Alpha = Alpha
@@ -34,6 +34,7 @@ class ModelConfig(object):
             self.MemorySize = MemorySize
             self.MemoryInitFill = MemoryInitFill
             self.TorchSeed = str(TorchSeed)
+            self.TargetUpdate = TargetUpdate
 
     # Default config
     def __init__(self, hiddenLayers = [150, 100], trainingConfig: TrainingConfig = TrainingConfig()):
@@ -59,6 +60,7 @@ class Model(object):
         self.BATCH_SIZE = config.Training.BatchSize
         self.MEMORY_SIZE = config.Training.MemorySize
         self.MEMORY_INIT_FILL = config.Training.MemoryInitFill
+        self.TARGET_UPDATE = config.Training.TargetUpdate
 
         self.env = env
 
@@ -68,7 +70,11 @@ class Model(object):
         state = env.reset()
         nnLayers =  [len(state)] + hiddenLayers + [env.action_space.n]
 
-        self.net = Net(nnLayers)
+        self.net = Net(nnLayers).to(device)
+        self.target_net = Net(nnLayers).to(device)
+
+        self.target_net.load_state_dict(self.net.state_dict())
+        self.target_net.eval()
 
         d = config.__dict__
         d['Training'] = d['Training'].__dict__
@@ -139,7 +145,7 @@ class Model(object):
         state_action_values = self.net(state_batch).gather(1, action_batch)
 
         next_state_values = torch.zeros(self.BATCH_SIZE, device=device)
-        next_state_values[non_final_mask] = self.net(non_final_next_states).max(1)[0].detach()
+        next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(1)[0].detach()
 
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * self.GAMMA) + reward_batch
@@ -215,6 +221,7 @@ class Model(object):
 
         eps_threshold = self.EPSILON_END + (self.EPSILON_START - self.EPSILON_END) * math.exp(-1. * steps_done / self.EDECAY)
         avg_reward = 0
+        max_reward = 0
 
         for i in range(num_episodes):
             cum_reward = 0
@@ -248,6 +255,7 @@ class Model(object):
                     env.render()
         
             avg_reward += cum_reward
+            max_reward = cum_reward if cum_reward > max_reward else cum_reward
 
             writer.add_scalar('Steps', steps, i)
             writer.add_scalar('Reward', cum_reward, i)
@@ -256,6 +264,8 @@ class Model(object):
 
             print("{i}\t: Reward: {r}\t Steps: {s}\t AvgReward: {ar:.2f}\t\t{t}".format(i = str(i+1), r = cum_reward, s = steps, ar = avg_reward / (i+1), t = self.__formatTime(time.time() - startTick)))
         
+            if i % self.TARGET_UPDATE == 0:
+                self.target_net.load_state_dict(self.net.state_dict())
         if render:
             env.close()
     
