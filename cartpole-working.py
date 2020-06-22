@@ -23,6 +23,6 @@ config.HiddenLayers = [150,100]
 
 m = model.Model(env, config)
 
-m.train(500, render=True)
+m.train(30, render=False)
 
 m.play(episodes=100)

@@ -33,7 +33,7 @@ class ModelConfig(object):
             self.BatchSize = BatchSize
             self.MemorySize = MemorySize
             self.MemoryInitFill = MemoryInitFill
-            self.TorchSeed = TorchSeed
+            self.TorchSeed = str(TorchSeed)
 
     # Default config
     def __init__(self, hiddenLayers = [150, 100], trainingConfig: TrainingConfig = TrainingConfig()):
@@ -214,7 +214,7 @@ class Model(object):
         steps_done = 0
 
         eps_threshold = self.EPSILON_END + (self.EPSILON_START - self.EPSILON_END) * math.exp(-1. * steps_done / self.EDECAY)
-
+        avg_reward = 0
 
         for i in range(num_episodes):
             cum_reward = 0
@@ -247,17 +247,14 @@ class Model(object):
                 if render:
                     env.render()
         
+            avg_reward += cum_reward
+
             writer.add_scalar('Steps', steps, i)
             writer.add_scalar('Reward', cum_reward, i)
             writer.add_scalar('Time', time.time() - startTick, i)
             writer.add_scalar('Epsilon', eps_threshold, i)
 
-            print("Episode", str(i+1))
-            print("Reward", cum_reward)
-            print("Steps", steps)
-            print("Time", self.__formatTime(time.time() - startTick))
-            print("")
-            # self.__optimize(memory)
+            print("{i}\t: Reward: {r}\t Steps: {s}\t AvgReward: {ar:.2f}\t\t{t}".format(i = str(i+1), r = cum_reward, s = steps, ar = avg_reward / (i+1), t = self.__formatTime(time.time() - startTick)))
         
         if render:
             env.close()
