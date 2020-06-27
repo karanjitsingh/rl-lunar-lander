@@ -26,7 +26,7 @@ class ModelConfig(object):
 
     # Training config
     class TrainingConfig(object):
-        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1, TargetUpdate = 10, EpisodeLimit = 750, TorchSeed = torch.seed()):
+        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1, TargetUpdate = 10, EpisodeLimit = 750, PunishLimit = 0, TorchSeed = torch.seed()):
             super().__init__()
             self.Gamma = Gamma
             self.Alpha = Alpha
@@ -38,6 +38,7 @@ class ModelConfig(object):
             self.TorchSeed = str(TorchSeed)
             self.TargetUpdate = TargetUpdate
             self.EpisodeLimit = EpisodeLimit
+            self.PunishLimit = PunishLimit
 
     # Default config
     def __init__(self, hiddenLayers = [150, 100], trainingConfig: TrainingConfig = TrainingConfig(), description = ""):
@@ -69,6 +70,7 @@ class Model(object):
         self.MEMORY_INIT_FILL = config.Training.MemoryInitFill
         self.TARGET_UPDATE = config.Training.TargetUpdate
         self.EPISODE_LIMIT = config.Training.EpisodeLimit
+        self.PUNISH_LIMIT = config.Training.PunishLimit
 
         self.env = env
 
@@ -259,9 +261,9 @@ class Model(object):
             state = torch.tensor([env.reset()]).float()
             done = False
 
-            eps_threshold = self.get_epsilon(i)
 
             while not done and (self.EPISODE_LIMIT == 0 or steps < self.EPISODE_LIMIT):
+                eps_threshold = self.get_epsilon(steps_done)
                 action = self.__selectAction(state, eps_threshold)
                 next_state, reward, done, _ = env.step(action.item())
 
@@ -281,6 +283,29 @@ class Model(object):
 
                 if render:
                     env.render()
+
+            if steps >= self.EPISODE_LIMIT and self.EPISODE_LIMIT != 0 and self.PUNISH_LIMIT > 0:
+                eps_threshold = self.get_epsilon(steps_done)
+                action = self.__selectAction(state, eps_threshold)
+                _, reward, done, _ = env.step(action.item())
+
+                next_state = None
+
+                if not done:
+                    reward = -1 * self.PUNISH_LIMIT
+
+                memory.push(state, action, next_state, torch.tensor([reward]).float())
+
+                steps += 1
+                steps_done += 1
+                cum_reward += reward
+
+                losssum += self.__optimize(memory, optimizer, steps_done)
+
+                if render:
+                    env.render()
+
+
         
             avg_reward += cum_reward
             max_reward = cum_reward if cum_reward > max_reward else cum_reward
@@ -318,8 +343,8 @@ class Model(object):
             summaryname = summaryname.split('/')
             summaryname = summaryname[-1]        
 
-        if not os.path.isdir('./models/{name}', name = summaryname):
-            os.mkdir('./models/{name}')
+        if not os.path.isdir('./models/' + summaryname):
+            os.mkdir('./models/' + summaryname)
 
         path = "./models/{name}/{name}{suffix}.model".format(name = summaryname, suffix = suffix)
 
@@ -344,7 +369,7 @@ class TrainedModel(object):
         self.model = torch.load(path)
 
         envName = self.model['EnvName']
-        self.env = gym.make(envName).unwrapped
+        self.env = gym.make(envName)
 
         state = self.env.reset()
         hiddenLayers = ast.literal_eval(self.model['HiddenLayers'])
@@ -354,7 +379,7 @@ class TrainedModel(object):
         self.net.load_state_dict(self.model['state_dict'])
 
     # Play an episode with current model
-    def play(self):
+    def play(self, render=True):
         env = self.env
 
         state = env.reset()
@@ -368,6 +393,7 @@ class TrainedModel(object):
             state, reward, done, _ = self.env.step(action)
             cum_reward += reward
             steps += 1
-            env.render()
+            if (render):
+                env.render()
 
         return cum_reward, steps

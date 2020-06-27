@@ -3,26 +3,43 @@ import model
 import sys
 import utils.breaker as breaker
 from pprint import pprint
+import json
+import io
 
 env = gym.make('LunarLander-v2').unwrapped
 
 render = False
-if len(sys.argv) > 1 and sys.argv[1] == "render":
+
+if len(sys.argv) > 2 and sys.argv[2] == "render":
     render = True
+
+rawconfig = dict()
+
+with open(sys.argv[1]) as file:
+    rawconfig = json.loads(file.read())
 
 config = model.ModelConfig()
 
-config.Training.Gamma = 0.99
-config.Training.Alpha = 0.0001
-config.Training.Epsilon = [0.9, 0.05]
-config.Training.EpsilonDecay = 100
-config.Training.BatchSize = 128
-config.Training.MemorySize = 10000
-config.Training.MemoryInitFill = 0.2
-config.Training.TargetUpdate = 10
-config.Training.EpisodeLimit = 750
-config.HiddenLayers = [100,100]
-config.Description = "epsilon graph"
+if "TorchSeed" in rawconfig.keys():
+    config.Training.TorchSeed = rawconfig['TorchSeed']
+
+config.Training.Gamma = rawconfig['Gamma']
+config.Training.Alpha = rawconfig['Alpha']
+config.Training.Epsilon = rawconfig['Epsilon']
+config.Training.EpsilonDecay = rawconfig['EpsilonDecay']
+config.Training.BatchSize = rawconfig['BatchSize']
+config.Training.MemorySize = rawconfig['MemorySize']
+config.Training.MemoryInitFill = rawconfig['MemoryInitFill']
+config.Training.TargetUpdate = rawconfig['TargetUpdate']
+config.Training.EpisodeLimit = rawconfig['EpisodeLimit']
+config.HiddenLayers = rawconfig['HiddenLayers']
+config.Description = rawconfig['Description']
+config.PunishLimit = rawconfig['PunishLimit']
+
+episodes = 3000
+
+if( "Episodes" in rawconfig.keys()):
+    episodes = rawconfig['Episodes']
 
 
 def onBreak():
@@ -31,11 +48,11 @@ def onBreak():
 breaker.setBreakHandle(onBreak)
 
 m = model.Model(env, config)
-m.train(3000, render=render)
+m.train(episodes, render=render)
 
 
 
-props, path =  m.saveModel(suffix=".3000")
+props, path =  m.saveModel(suffix="." + str(episodes))
 pprint(props)
 
 input("\nPress Enter to continue...")

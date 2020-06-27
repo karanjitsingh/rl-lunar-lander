@@ -12,11 +12,13 @@ m = model.TrainedModel(path)
 rewards = []
 
 for i in range(episodes):
-    r = m.play()
+    r = m.play(render=True)
     print(r)
     rewards.append(r)
 
+m.env.close()
+
 
 print(rewards)
-print("Episodes: " + episodes)
-print("Average reward: " + str(sum(rewards)/episodes))
+print("Episodes: " + str(episodes))
+print("Average reward: " + str(sum(list(map(lambda r: r[0], rewards)))/episodes))
