@@ -1,21 +1,23 @@
+import ast
+import json
+import math
 import os
 import random
 import time
-import math
+from pprint import pprint
 
+import gym
+import numpy as np
 import torch
-from torch.functional import F
 import torch.nn as nn
 import torch.optim as optim
 from gym import Env
+from torch.functional import F
+from torch.utils.tensorboard import SummaryWriter
 
 from dqn import Net
 from replay import ReplayMemory, Transition
 
-from torch.utils.tensorboard import SummaryWriter
-import numpy as np
-
-writer = SummaryWriter()
 device = torch.device("cpu")
 
 
@@ -24,7 +26,7 @@ class ModelConfig(object):
 
     # Training config
     class TrainingConfig(object):
-        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1, TargetUpdate = 10, TorchSeed = torch.seed()):
+        def __init__(self, Gamma=0.99, Alpha=0.01, Epsilon=[0.9,0.05], EpsilonDecay=200, BatchSize = 128, MemorySize = 100000, MemoryInitFill = 0.1, TargetUpdate = 10, EpisodeLimit = 750, TorchSeed = torch.seed()):
             super().__init__()
             self.Gamma = Gamma
             self.Alpha = Alpha
@@ -35,12 +37,14 @@ class ModelConfig(object):
             self.MemoryInitFill = MemoryInitFill
             self.TorchSeed = str(TorchSeed)
             self.TargetUpdate = TargetUpdate
+            self.EpisodeLimit = EpisodeLimit
 
     # Default config
-    def __init__(self, hiddenLayers = [150, 100], trainingConfig: TrainingConfig = TrainingConfig()):
+    def __init__(self, hiddenLayers = [150, 100], trainingConfig: TrainingConfig = TrainingConfig(), description = ""):
         super().__init__()
         self.HiddenLayers = hiddenLayers
         self.Training = trainingConfig
+        self.Description = description
 
 
 class Model(object):
@@ -49,8 +53,11 @@ class Model(object):
         super().__init__()
 
         self.config = config
+        self.writer = SummaryWriter()
 
         hiddenLayers = config.HiddenLayers
+
+        self.safeBreak = False
 
         self.GAMMA = config.Training.Gamma
         self.ALPHA = config.Training.Alpha
@@ -61,6 +68,7 @@ class Model(object):
         self.MEMORY_SIZE = config.Training.MemorySize
         self.MEMORY_INIT_FILL = config.Training.MemoryInitFill
         self.TARGET_UPDATE = config.Training.TargetUpdate
+        self.EPISODE_LIMIT = config.Training.EpisodeLimit
 
         self.env = env
 
@@ -76,17 +84,24 @@ class Model(object):
         self.target_net.load_state_dict(self.net.state_dict())
         self.target_net.eval()
 
-        d = config.__dict__
-        d['Training'] = d['Training'].__dict__
+        self.modelprops = config.__dict__
+        self.modelprops['Training'] = self.modelprops['Training'].__dict__
         
-        d['Training']['Epsilon'] = str(d['Training']['Epsilon'])
-        d['HiddenLayers'] = str(d['HiddenLayers'])
+        self.modelprops['Training']['Epsilon'] = str(self.modelprops['Training']['Epsilon'])
+        self.modelprops['HiddenLayers'] = str(self.modelprops['HiddenLayers'])
 
-        d = dict(d, **d['Training'])
+        self.modelprops['EnvName'] = env.unwrapped.spec.id
 
-        del d['Training']
+        self.modelprops = dict(self.modelprops, **self.modelprops['Training'])
+
+        del self.modelprops['Training']
         
-        writer.add_hparams(d, {})
+        self.writer.add_hparams(self.modelprops, {})
+
+        self.writer.add_text("Description", config.Description)
+        self.writer.add_text("Params", json.dumps(self.modelprops, indent=2))
+
+        self.modelprops['SummaryLogs'] = self.writer.log_dir
 
 
     # Format seconds to mm:ss
@@ -151,7 +166,7 @@ class Model(object):
         expected_state_action_values = (next_state_values * self.GAMMA) + reward_batch
 
         # Compute Huber loss
-        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+        loss = F.mse_loss(state_action_values, expected_state_action_values.unsqueeze(1))
 
         # Optimize the model
         optimizer.zero_grad()
@@ -164,7 +179,8 @@ class Model(object):
         
         optimizer.step()
 
-        writer.add_scalar('Loss', loss.item(), steps)
+        lossvalue = loss.item()
+        return lossvalue
 
 
     def __selectAction(self, state, eps_threshold):
@@ -205,34 +221,47 @@ class Model(object):
                 state = next_state
 
 
+    def get_epsilon(self, steps):
+        return self.EPSILON_END + (self.EPSILON_START - self.EPSILON_END) * math.exp(-1. * steps / self.EDECAY)
+
     # Train the current model
     def train(self, num_episodes, render = False):
         startTick = time.time()
 
         env = self.env
         memory = ReplayMemory(self.MEMORY_SIZE)
+        self.safeBreak = False
 
         self.__fillMemory(memory, self.MEMORY_INIT_FILL)
 
 
-        optimizer = optim.SGD(list(self.net.parameters()), lr=self.ALPHA)
+        optimizer = optim.Adam(list(self.net.parameters()), lr=self.ALPHA)
 
         steps_done = 0
 
-        eps_threshold = self.EPSILON_END + (self.EPSILON_START - self.EPSILON_END) * math.exp(-1. * steps_done / self.EDECAY)
+        eps_threshold = self.EPSILON_START
         avg_reward = 0
         max_reward = 0
 
         for i in range(num_episodes):
+
+            if i != 0 and i % 300 == 0:
+                self.saveModel(suffix="." + str(i))
+
+            if (self.safeBreak):
+                print("Safely breaking training loop, Episodes: {i} of {n}".format(i=i, n=num_episodes))
+                break
+
             cum_reward = 0
             steps = 0
+            losssum = 0
         
             state = torch.tensor([env.reset()]).float()
             done = False
 
-            while not done:
-                eps_threshold = self.EPSILON_END + (self.EPSILON_START - self.EPSILON_END) * math.exp(-1. * steps_done / self.EDECAY)
+            eps_threshold = self.get_epsilon(i)
 
+            while not done and (self.EPISODE_LIMIT == 0 or steps < self.EPISODE_LIMIT):
                 action = self.__selectAction(state, eps_threshold)
                 next_state, reward, done, _ = env.step(action.item())
 
@@ -248,8 +277,7 @@ class Model(object):
                 steps_done += 1
                 cum_reward += reward
 
-                self.__optimize(memory, optimizer, steps_done)
-
+                losssum += self.__optimize(memory, optimizer, steps_done)
 
                 if render:
                     env.render()
@@ -257,12 +285,12 @@ class Model(object):
             avg_reward += cum_reward
             max_reward = cum_reward if cum_reward > max_reward else cum_reward
 
-            writer.add_scalar('Steps', steps, i)
-            writer.add_scalar('Reward', cum_reward, i)
-            writer.add_scalar('Time', time.time() - startTick, i)
-            writer.add_scalar('Epsilon', eps_threshold, i)
+            self.writer.add_scalar('LossAvg', losssum/steps, i)
+            self.writer.add_scalar('Steps', steps, i)
+            self.writer.add_scalar('Reward', cum_reward, i)
+            self.writer.add_scalar('Epsilon', eps_threshold, i)
 
-            print("{i}\t: Reward: {r}\t Steps: {s}\t AvgReward: {ar:.2f}\t\t{t}".format(i = str(i+1), r = cum_reward, s = steps, ar = avg_reward / (i+1), t = self.__formatTime(time.time() - startTick)))
+            print("{i}\t: Reward: {r}\t Steps: {s}\t AvgReward: {ar:.2f}\t\t{t}\t{d}\t{desc}".format(i = str(i+1), r = cum_reward, s = steps, ar = avg_reward / (i+1), t = self.__formatTime(time.time() - startTick), d = self.writer.log_dir, desc = self.config.Description))
         
             if i % self.TARGET_UPDATE == 0:
                 self.target_net.load_state_dict(self.net.state_dict())
@@ -274,3 +302,72 @@ class Model(object):
         self.TrainingEpisodes = num_episodes
 
         print("{n} Episodes, Time Elapsed {t}".format(n=str(num_episodes), t=self.__formatTime(elapsed)))
+
+
+    # Safely break training loop:
+    def setSafeBreak(self):
+        self.safeBreak = True
+
+
+    def saveModel(self, suffix=""):
+
+        summaryname = self.modelprops['SummaryLogs'].split('\\')
+        if len(summaryname) > 1:
+            summaryname = summaryname[-1]
+        else:
+            summaryname = summaryname.split('/')
+            summaryname = summaryname[-1]        
+
+        if not os.path.isdir('./models/{name}', name = summaryname):
+            os.mkdir('./models/{name}')
+
+        path = "./models/{name}/{name}{suffix}.model".format(name = summaryname, suffix = suffix)
+
+        props = dict.copy(self.modelprops)
+
+        state_dict = self.net.state_dict()
+        props["state_dict"] = state_dict
+
+        torch.save(props, path)
+
+        print("Saved model to " + path)
+
+        del props['state_dict']
+        return props, path
+
+
+class TrainedModel(object):
+
+    def __init__(self, path):
+        super().__init__()
+
+        self.model = torch.load(path)
+
+        envName = self.model['EnvName']
+        self.env = gym.make(envName).unwrapped
+
+        state = self.env.reset()
+        hiddenLayers = ast.literal_eval(self.model['HiddenLayers'])
+        nnLayers =  [len(state)] + hiddenLayers + [self.env.action_space.n]
+        self.net = Net(nnLayers).to(device)
+
+        self.net.load_state_dict(self.model['state_dict'])
+
+    # Play an episode with current model
+    def play(self):
+        env = self.env
+
+        state = env.reset()
+        done = False
+
+        cum_reward = 0
+        steps = 0
+
+        while not done:
+            action = torch.argmax(self.net.forward(torch.tensor(state).float())).item()
+            state, reward, done, _ = self.env.step(action)
+            cum_reward += reward
+            steps += 1
+            env.render()
+
+        return cum_reward, steps
