@@ -19,6 +19,10 @@ with open(sys.argv[1]) as file:
     rawconfig = json.loads(file.read())
 
 config = model.ModelConfig()
+punishLimit = 0
+
+if 'PunishLimit' in rawconfig.keys():
+    punishLimit = rawconfig['PunishLimit']
 
 if "TorchSeed" in rawconfig.keys():
     config.Training.TorchSeed = rawconfig['TorchSeed']
@@ -34,7 +38,7 @@ config.Training.TargetUpdate = rawconfig['TargetUpdate']
 config.Training.EpisodeLimit = rawconfig['EpisodeLimit']
 config.HiddenLayers = rawconfig['HiddenLayers']
 config.Description = rawconfig['Description']
-config.PunishLimit = rawconfig['PunishLimit']
+config.PunishLimit = punishLimit
 
 episodes = 3000
 
@@ -48,7 +52,14 @@ def onBreak():
 breaker.setBreakHandle(onBreak)
 
 m = model.Model(env, config)
-m.train(episodes, render=render)
+
+if "OnPolicy" in rawconfig.keys():
+    m.train_onpolicy(episodes, render=render)
+
+elif rawconfig['MemorySize'] == 0:
+    m.train_nomem(episodes, render=render)
+else:
+    m.train(episodes, render=render)
 
 
 

@@ -10,5 +10,6 @@
     "EpisodeLimit": 750,
     "HiddenLayers": [100,100],
     "Description": "normal model high gamma",
-    "PunishLimit": 0
+    "PunishLimit": 0,
+    "Episodes": 6000
 }

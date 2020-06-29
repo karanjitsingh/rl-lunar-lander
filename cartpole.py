@@ -25,4 +25,4 @@ config.HiddenLayers = [150,100]
 
 m = model.Model(env, config)
 
-m.train(200, render=False)
+m.train(300, render=True)

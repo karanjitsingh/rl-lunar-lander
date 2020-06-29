@@ -140,7 +140,7 @@ class Model(object):
     # Optimize the model, apply gradient descent
     def __optimize(self, memory: ReplayMemory, optimizer: optim.Optimizer, steps):
         if self.BATCH_SIZE > len(memory):
-            return
+            raise "batch size greater than capacity"
 
         transitions = memory.sample(self.BATCH_SIZE)
 
@@ -184,13 +184,86 @@ class Model(object):
         lossvalue = loss.item()
         return lossvalue
 
+    
+    # Optimize the model, apply gradient descent
+    def __optimize_nomem(self, transition: Transition, optimizer: optim.Optimizer, steps, onpolicy=False):
+        
+        state_action_value = self.net(transition.state).gather(1, transition.action)
+        next_state_value = torch.tensor(0) if transition.next_state is None else self.net(transition.state).max(1)[0]
+
+        action = None if transition.next_state is None else torch.tensor([[torch.argmax(self.net(transition.state))]])
+
+        # Compute the expected Q values
+        expected_state_action_value = (next_state_value * self.GAMMA) + transition.reward
+
+        # Compute Huber loss
+        loss = F.mse_loss(state_action_value, expected_state_action_value)
+
+        # Optimize the model
+        optimizer.zero_grad()
+        loss.backward()
+
+
+        # clip gradients
+        for param in self.net.parameters():
+            param.grad.data.clamp_(-1, 1)
+        
+        optimizer.step()
+
+        lossvalue = loss.item()
+
+        if onpolicy:
+            return lossvalue, action
+        return lossvalue
+
+    
+    # Optimize the model, apply gradient descent
+    def __optimize_sarsa(self, transition: Transition, optimizer: optim.Optimizer, next_action, steps, onpolicy=False):
+        
+        state_action_value = self.net(transition.state).gather(1, transition.action)
+        next_state_value = torch.tensor(0) if transition.next_state is None else self.net(transition.next_state).gather(1, next_action)
+
+        # Compute the expected Q values
+        expected_state_action_value = (next_state_value * self.GAMMA) + transition.reward
+
+        # Compute Huber loss
+        loss = F.mse_loss(state_action_value, expected_state_action_value)
+
+        # Optimize the model
+        optimizer.zero_grad()
+        loss.backward()
+
+
+        # clip gradients
+        for param in self.net.parameters():
+            param.grad.data.clamp_(-1, 1)
+        
+        optimizer.step()
+
+        lossvalue = loss.item()
+
+        return lossvalue
+
+
+    def __getPolicyAction(self, state):
+        with torch.no_grad():
+            return self.net(state).max(1)[1].view(1,1)
+
+
+    def __getRandomAction(self, state, eps_threshold, defaultAction):
+        sample = random.random()
+
+        if sample <= eps_threshold:
+            return torch.tensor([[random.randrange(self.env.action_space.n)]], device=device, dtype=torch.long)
+
+        return defaultAction
+        
 
     def __selectAction(self, state, eps_threshold):
         sample = random.random()
 
         if sample > eps_threshold:
-            with torch.no_grad():
-                return self.net(state).max(1)[1].view(1,1)
+            return self.__getPolicyAction(state)
         else:
             return torch.tensor([[random.randrange(self.env.action_space.n)]], device=device, dtype=torch.long)  
 
@@ -279,7 +352,8 @@ class Model(object):
                 steps_done += 1
                 cum_reward += reward
 
-                losssum += self.__optimize(memory, optimizer, steps_done)
+                l = self.__optimize(memory, optimizer, steps_done)
+                losssum += l
 
                 if render:
                     env.render()
@@ -307,6 +381,292 @@ class Model(object):
 
 
         
+            avg_reward += cum_reward
+            max_reward = cum_reward if cum_reward > max_reward else cum_reward
+
+            self.writer.add_scalar('LossAvg', losssum/steps, i)
+            self.writer.add_scalar('Steps', steps, i)
+            self.writer.add_scalar('Reward', cum_reward, i)
+            self.writer.add_scalar('Epsilon', eps_threshold, i)
+
+            print("{i}\t: Reward: {r}\t Steps: {s}\t AvgReward: {ar:.2f}\t\t{t}\t{d}\t{desc}".format(i = str(i+1), r = cum_reward, s = steps, ar = avg_reward / (i+1), t = self.__formatTime(time.time() - startTick), d = self.writer.log_dir, desc = self.config.Description))
+        
+            if i % self.TARGET_UPDATE == 0:
+                self.target_net.load_state_dict(self.net.state_dict())
+        if render:
+            env.close()
+    
+        elapsed = time.time()-startTick
+        self.TrainingTime = elapsed
+        self.TrainingEpisodes = num_episodes
+
+        print("{n} Episodes, Time Elapsed {t}".format(n=str(num_episodes), t=self.__formatTime(elapsed)))
+
+
+    
+    # Train the current model
+    def train_nomem(self, num_episodes, render = False):
+        startTick = time.time()
+
+        env = self.env
+        self.safeBreak = False
+
+        optimizer = optim.Adam(list(self.net.parameters()), lr=self.ALPHA)
+
+        steps_done = 0
+
+        eps_threshold = self.EPSILON_START
+        avg_reward = 0
+        max_reward = 0
+
+        for i in range(num_episodes):
+
+            if i != 0 and i % 300 == 0:
+                self.saveModel(suffix="." + str(i))
+
+            if (self.safeBreak):
+                print("Safely breaking training loop, Episodes: {i} of {n}".format(i=i, n=num_episodes))
+                break
+
+            cum_reward = 0
+            steps = 0
+            losssum = 0
+        
+            state = torch.tensor([env.reset()]).float()
+            done = False
+            next_action = torch.tensor(0)
+
+            while not done and (self.EPISODE_LIMIT == 0 or steps < self.EPISODE_LIMIT):
+                eps_threshold = self.get_epsilon(steps_done)
+                action = self.__getRandomAction(state, eps_threshold)
+                next_state, reward, done, _ = env.step(action.item())
+
+                if not done:
+                    next_state = torch.tensor([next_state]).float()
+                else:
+                    next_state = None
+
+                steps += 1
+                steps_done += 1
+                cum_reward += reward
+
+                losssum += self.__optimize_nomem(Transition(state, action, next_state, torch.tensor([reward]).float()), optimizer, steps_done)
+
+                state = next_state
+
+                if render:
+                    env.render()
+
+            if steps >= self.EPISODE_LIMIT and self.EPISODE_LIMIT != 0 and self.PUNISH_LIMIT > 0:
+                eps_threshold = self.get_epsilon(steps_done)
+                action = self.__selectAction(state, eps_threshold)
+                _, reward, done, _ = env.step(action.item())
+
+                next_state = None
+
+                if not done:
+                    reward = -1 * self.PUNISH_LIMIT
+
+                steps += 1
+                steps_done += 1
+                cum_reward += reward
+
+                losssum += self.__optimize_nomem(Transition(state, action, next_state, torch.tensor([reward]).float()), optimizer, steps_done)
+
+                if render:
+                    env.render()
+
+            avg_reward += cum_reward
+            max_reward = cum_reward if cum_reward > max_reward else cum_reward
+
+            self.writer.add_scalar('LossAvg', losssum/steps, i)
+            self.writer.add_scalar('Steps', steps, i)
+            self.writer.add_scalar('Reward', cum_reward, i)
+            self.writer.add_scalar('Epsilon', eps_threshold, i)
+
+            print("{i}\t: Reward: {r}\t Steps: {s}\t AvgReward: {ar:.2f}\t\t{t}\t{d}\t{desc}".format(i = str(i+1), r = cum_reward, s = steps, ar = avg_reward / (i+1), t = self.__formatTime(time.time() - startTick), d = self.writer.log_dir, desc = self.config.Description))
+        
+            if i % self.TARGET_UPDATE == 0:
+                self.target_net.load_state_dict(self.net.state_dict())
+        if render:
+            env.close()
+    
+        elapsed = time.time()-startTick
+        self.TrainingTime = elapsed
+        self.TrainingEpisodes = num_episodes
+
+        print("{n} Episodes, Time Elapsed {t}".format(n=str(num_episodes), t=self.__formatTime(elapsed)))
+
+    
+    # Train the current model
+    def train_onpolicy(self, num_episodes, render = False):
+        startTick = time.time()
+
+        env = self.env
+        self.safeBreak = False
+
+        optimizer = optim.Adam(list(self.net.parameters()), lr=self.ALPHA)
+
+        steps_done = 0
+
+        eps_threshold = self.EPSILON_START
+        avg_reward = 0
+        max_reward = 0
+
+        for i in range(num_episodes):
+
+            if i != 0 and i % 300 == 0:
+                self.saveModel(suffix="." + str(i))
+
+            if (self.safeBreak):
+                print("Safely breaking training loop, Episodes: {i} of {n}".format(i=i, n=num_episodes))
+                break
+
+            cum_reward = 0
+            steps = 0
+            losssum = 0
+        
+            state = torch.tensor([env.reset()]).float()
+            done = False
+
+            while not done and (self.EPISODE_LIMIT == 0 or steps < self.EPISODE_LIMIT):
+                eps_threshold = self.get_epsilon(steps_done)
+                action = self.__selectAction(state, eps_threshold)
+                next_state, reward, done, _ = env.step(action.item())
+
+                if not done:
+                    next_state = torch.tensor([next_state]).float()
+                else:
+                    next_state = None
+
+                steps += 1
+                steps_done += 1
+                cum_reward += reward
+
+                losssum += self.__optimize_nomem(Transition(state, action, next_state, torch.tensor([reward]).float()), optimizer, steps_done)
+
+                state = next_state
+
+                if render:
+                    env.render()
+
+            if steps >= self.EPISODE_LIMIT and self.EPISODE_LIMIT != 0 and self.PUNISH_LIMIT > 0:
+                eps_threshold = self.get_epsilon(steps_done)
+                action = self.__selectAction(state, eps_threshold)
+                _, reward, done, _ = env.step(action.item())
+
+                next_state = None
+
+                if not done:
+                    reward = -1 * self.PUNISH_LIMIT
+
+                steps += 1
+                steps_done += 1
+                cum_reward += reward
+
+                losssum += self.__optimize_nomem(Transition(state, action, next_state, torch.tensor([reward]).float()), optimizer, steps_done)
+
+                if render:
+                    env.render()
+
+            avg_reward += cum_reward
+            max_reward = cum_reward if cum_reward > max_reward else cum_reward
+
+            self.writer.add_scalar('LossAvg', losssum/steps, i)
+            self.writer.add_scalar('Steps', steps, i)
+            self.writer.add_scalar('Reward', cum_reward, i)
+            self.writer.add_scalar('Epsilon', eps_threshold, i)
+
+            print("{i}\t: Reward: {r}\t Steps: {s}\t AvgReward: {ar:.2f}\t\t{t}\t{d}\t{desc}".format(i = str(i+1), r = cum_reward, s = steps, ar = avg_reward / (i+1), t = self.__formatTime(time.time() - startTick), d = self.writer.log_dir, desc = self.config.Description))
+        
+        if render:
+            env.close()
+    
+        elapsed = time.time()-startTick
+        self.TrainingTime = elapsed
+        self.TrainingEpisodes = num_episodes
+
+        print("{n} Episodes, Time Elapsed {t}".format(n=str(num_episodes), t=self.__formatTime(elapsed)))
+
+
+    # Train the current model
+    def train_onpolicy(self, num_episodes, render = False):
+        startTick = time.time()
+
+        env = self.env
+        self.safeBreak = False
+
+        optimizer = optim.Adam(list(self.net.parameters()), lr=self.ALPHA)
+
+        steps_done = 0
+
+        eps_threshold = self.EPSILON_START
+        avg_reward = 0
+        max_reward = 0
+
+        for i in range(num_episodes):
+
+            if i != 0 and i % 300 == 0:
+                self.saveModel(suffix="." + str(i))
+
+            if (self.safeBreak):
+                print("Safely breaking training loop, Episodes: {i} of {n}".format(i=i, n=num_episodes))
+                break
+
+            cum_reward = 0
+            steps = 0
+            losssum = 0
+        
+            state = torch.tensor([env.reset()]).float()
+            done = False
+            next_action = self.__selectAction(state, eps_threshold)
+
+            while not done and (self.EPISODE_LIMIT == 0 or steps < self.EPISODE_LIMIT):
+                eps_threshold = self.get_epsilon(steps_done)
+                action = self.__getRandomAction(state, eps_threshold, next_action)
+                next_state, reward, done, _ = env.step(action.item())
+
+                if not done:
+                    next_state = torch.tensor([next_state]).float()
+                    next_action = self.__selectAction(next_state, eps_threshold)
+                else:
+                    next_state = None
+
+
+
+                steps += 1
+                steps_done += 1
+                cum_reward += reward
+
+                losssum += self.__optimize_sarsa(Transition(state, action, next_state, torch.tensor([reward]).float()), optimizer, next_action, steps_done, onpolicy=True)
+
+                action = next_action
+                state = next_state
+
+                if render:
+                    env.render()
+
+            if steps >= self.EPISODE_LIMIT and self.EPISODE_LIMIT != 0 and self.PUNISH_LIMIT > 0:
+                eps_threshold = self.get_epsilon(steps_done)
+                action = self.__getRandomAction(state, eps_threshold, next_action)
+                _, reward, done, _ = env.step(action.item())
+
+                next_state = None
+
+                if not done:
+                    reward = -1 * self.PUNISH_LIMIT
+
+                steps += 1
+                steps_done += 1
+                cum_reward += reward
+
+                next_action = self.select_action(next_state, eps_threshold)
+
+                losssum += self.__optimize_sarsa(Transition(state, action, next_state, torch.tensor([reward]).float()), optimizer, next_action, steps_done, onpolicy=True)
+
+                if render:
+                    env.render()
+
             avg_reward += cum_reward
             max_reward = cum_reward if cum_reward > max_reward else cum_reward
 
