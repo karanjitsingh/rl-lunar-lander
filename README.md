@@ -46,7 +46,7 @@ To render the environment while training run:
 python ./lander.py ./configs/normal.json
 ```
 
-![tensorboard screenshot](./screenshots/tbscreenshot.png)
+![tensorboard screenshot](https://github.com/karanjitsingh/gatech/blob/master/CS%207642%20RL/Projects/Project%202/screenshots/tbscreenshot.PNG?raw=true)
 
 The training event data is recorded with tensorboard and event files is stored in `./runs` and after the complete run the model is stored in `./models`
 
