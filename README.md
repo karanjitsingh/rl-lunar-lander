@@ -1,4 +1,6 @@
-# Project 2: Lunar Lander
+# RL Lunar Lander
+
+Using Reinforcement Learning to solve OpenAI's Lunar Lander problem
 
 | Path                | Description                                      |
 | ------------------- | ------------------------------------------------ |
