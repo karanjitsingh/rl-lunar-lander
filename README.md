@@ -2,6 +2,11 @@
 
 Using Reinforcement Learning to solve OpenAI's Lunar Lander problem
 
+![Lunar landings](https://i.imgur.com/J0N6aQy.gif)
+
+### Source
+
+
 | Path                | Description                                      |
 | ------------------- | ------------------------------------------------ |
 | **Directories**                                                        |
@@ -20,7 +25,7 @@ Using Reinforcement Learning to solve OpenAI's Lunar Lander problem
 | replay.py           | Class for replay memory                          |
 | playmodel.py        | Play trained model                               |
 | plotrun.py          | Generate graphs for runs                         |
-| plotmodek.py        | Generate graphs for trained agents               |
+| plotmodel.py        | Generate graphs for trained agents               |
 |                                                                        |
 | **Misc**                                                               |
 | env.yml             | Conda exported environment                       |
