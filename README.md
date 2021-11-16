@@ -1,35 +1,8 @@
 # RL Lunar Lander
 
-Using Reinforcement Learning to solve OpenAI's Lunar Lander problem
+Using Reinforcement Learning to solve OpenAI's Lunar Lander problem. Checkout the [whitepaper](https://raw.githubusercontent.com/karanjitsingh/rl-lunar-lander/master/whitepaper.pdf) for this project.
 
 ![Lunar landings](https://i.imgur.com/J0N6aQy.gif)
-
-### Source
-
-
-| Path                | Description                                      |
-| ------------------- | ------------------------------------------------ |
-| **Directories**                                                        |
-| goodmodels/         | Contains the well trained agents                 |
-| models/             | Directory of trained models                      |
-| runs/               | Directory of tensorboard logdata for each run    |
-| configs/            | Configurations for different models for training |
-| utils/              | Python utility scripts                           |
-|                                                                        |
-| **Python Scripts**                                                     |
-| cartpole.py         | Train model for Cartpole-V0                      |
-| cartpole-working.py | Script for seeded model for cartpole             |
-| lander.py           | Train model for LunaLander-V2                    |
-| dqn.py              | Class for neural network                         |
-| model.py            | Classes for model training and configurations    |
-| replay.py           | Class for replay memory                          |
-| playmodel.py        | Play trained model                               |
-| plotrun.py          | Generate graphs for runs                         |
-| plotmodel.py        | Generate graphs for trained agents               |
-|                                                                        |
-| **Misc**                                                               |
-| env.yml             | Conda exported environment                       |
-
 
 ### Creating conda environment
 
@@ -53,7 +26,7 @@ To render the environment while training run:
 python ./lander.py ./configs/normal.json
 ```
 
-![tensorboard screenshot](https://github.com/karanjitsingh/gatech/blob/master/CS%207642%20RL/Projects/Project%202/screenshots/tbscreenshot.PNG?raw=true)
+![tensorboard screenshot](https://raw.githubusercontent.com/karanjitsingh/rl-lunar-lander/master/screenshots/tbscreenshot.PNG)
 
 The training event data is recorded with tensorboard and event files is stored in `./runs` and after the complete run the model is stored in `./models`
 
@@ -94,6 +67,34 @@ To run a trained model select a model from `./models/` and run `playmodel.py` as
 #                      Path to model             Number of episodes to run
 python playmodel.py    ./goodmodels/dqn.model    100
 ```
+
+
+### Source Descriptions
+
+| Path                | Description                                      |
+| ------------------- | ------------------------------------------------ |
+| **Directories**                                                        |
+| goodmodels/         | Contains the well trained agents                 |
+| models/             | Directory of trained models                      |
+| runs/               | Directory of tensorboard logdata for each run    |
+| configs/            | Configurations for different models for training |
+| utils/              | Python utility scripts                           |
+|                                                                        |
+| **Python Scripts**                                                     |
+| cartpole.py         | Train model for Cartpole-V0                      |
+| cartpole-working.py | Script for seeded model for cartpole             |
+| lander.py           | Train model for LunaLander-V2                    |
+| dqn.py              | Class for neural network                         |
+| model.py            | Classes for model training and configurations    |
+| replay.py           | Class for replay memory                          |
+| playmodel.py        | Play trained model                               |
+| plotrun.py          | Generate graphs for runs                         |
+| plotmodel.py        | Generate graphs for trained agents               |
+|                                                                        |
+| **Misc**                                                               |
+| env.yml             | Conda exported environment                       |
+
+
 
 -----
 Happy Lunar Landings!
